@@ -5,12 +5,14 @@
 //  Author: Aidan Fox
 //
 //  Date Created: 9/17/23.
-//  Last Edited:  9/22/23.
+//  Last Edited:  10/16/23.
 //  -------------------------------
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
+#include <time.h>
 
 // Global Constants
 
@@ -40,24 +42,47 @@ void get_line(char[], int);
 void get_tokens(char[], char[][MAXTOKENLENGTH], int*);
 int process_command(char[][MAXTOKENLENGTH], int);
 
+// ----------------
+// Memory Functions
+// ----------------
+void free_space(void);
+
 // -----------------------------------
 // ### Command Function Prototypes ###
 // -----------------------------------
 
 void command_new(int, int, int);
 void command_show(void);
+void command_uncover(int, int);
+void command_flag(int, int);
 
 //----------------------------------------
 // ### Cell Struct Function Prototypes ###
 //----------------------------------------
+
 void init_cell(cell*, int, int);
 void adj_check(cell*, int, int);
+void adj_mine(cell*, int, int);
 void display_cell(cell*);
+int get_random(int range);
+void mine_random(void);
+void mine_shuffle(int shuffle);
+
+// -------------------------------------
+// ### Gameplay Function Prototypes ####
+// -------------------------------------
+
+void recursive_uncover(int, int);
+void game_over(void);
+
 
 //global variables
 cell **board;                        // 2D array, declared as pointer to a pointer to cell.
-int rows, cols, mines, mineCounter;  // number of rows, columns mines respectively.
-
+int rows, cols, mines = 0;           // number of rows, columns mines respectively.
+int mineCounter;
+const int neighborcount = 8;
+const int row_neighbors[] = {-1, -1, 0, 1, 1,  1,  0, -1}; //offset arrays for neighbor cells
+const int col_neighbors[] = { 0,  1, 1, 1, 0, -1, -1, -1};
 
 // ---------------------
 // ### Main Function ###
@@ -103,6 +128,12 @@ int process_command(char tokens[][MAXTOKENLENGTH], int tokencount){
     }else if (strcmp(tokens[0], "show") == 0){
         command_show();
         return 1;
+    }else if (strcmp(tokens[0], "uncover") == 0){
+        command_uncover(atoi(tokens[1]), atoi(tokens[2]));
+        return 1;
+    }else if (strcmp(tokens[0], "flag") == 0){
+        command_flag(atoi(tokens[1]), atoi(tokens[2]));
+        return 1;
     }else if (strcmp(tokens[0], "quit") == 0){
         return 0;
     }
@@ -112,6 +143,8 @@ int process_command(char tokens[][MAXTOKENLENGTH], int tokencount){
 int run_game(){
     char line[MAXLINELENGTH];
     char tokens[MAXTOKENCOUNT][MAXTOKENLENGTH];
+    
+    srand((unsigned)time(0));
     
     while(1){
         int tokencount, status;
@@ -129,14 +162,35 @@ int run_game(){
     return 1;
 }
 
+// ----------------
+// Memory Functions
+// ----------------
+void free_space(){
+    for(int i = 0; i < rows; i++){
+        free(board[i]);
+        board[i] = NULL;
+    }
+    free(board);
+    board = NULL;
+    rows = 0;
+    cols = 0;
+    mines = 0;
+    printf("Board Cleared Successfully!\n");
+}
+
 // -----------------
 // command functions
 // -----------------
 
 void command_new(int r, int c, int m){
+    free_space(); // free up previously allocated space to prevent memory leaks
+    
+    printf("Generating new board with dimensions : %d x %d and %d mines...\n", r, c, m);
+    
     rows = r;
     cols = c;
     mines = m;
+    mineCounter = mines;
     
     //allocate intial row vector
     board = (cell **) malloc(sizeof(cell*) * rows);
@@ -153,16 +207,26 @@ void command_new(int r, int c, int m){
         }
     }
     
-    /* Implement at a Later Time
-     
-    // for each cell call adj_check() to set adjacency values
+    //mine_shuffle(rows*cols*mines);
+    mine_random();
+    
+    /*
     for(int i = 0; i < rows; i++){
         for(int j = 0; j < cols; j++){
             adj_check(&board[i][j], i, j);
         }
     }
-     
     */
+    
+    // different adjacency method
+    for(int r = 0; r < rows; r++){
+        for(int c = 0; c < cols; c++){
+            if(board[r][c].mined == 1){
+                adj_mine(&board[r][c], r, c);
+            }
+        }
+    }
+    printf("Board Generated Successfuly!\n");
 }
 
 void command_show(){
@@ -172,7 +236,29 @@ void command_show(){
         }
         printf("\n");
     }
+    printf("Total Mines: %d\n", mines);
     
+}
+
+void command_uncover(int r, int c){
+    if(board[r][c].mined == 1){
+        game_over();
+    }else if(board[r][c].flagged == 1){
+        printf("Cell at %d, %d is flagged", r, c);
+        return;
+    }else{
+        recursive_uncover(r, c);
+    }
+    command_show();
+}
+
+void command_flag(int r, int c){
+    if(board[r][c].flagged == 0){
+        board[r][c].flagged = 1;
+    }else{
+        board[r][c].flagged = 0;
+    }
+    command_show();
 }
 
 
@@ -181,9 +267,14 @@ void command_show(){
 //-----------------------
 
 void init_cell(cell* cell, int r, int c){
+    
     int pos = (r * cols) + c;
-    (*cell).position = pos;
-    // other struct members tbi at a later time
+    cell->position = pos;
+    cell->covered = 1;
+    cell->mined = 0;
+    cell->adjcount = 0;
+    
+    
 }
 
 void adj_check(cell* cell, int r, int c){
@@ -194,22 +285,111 @@ void adj_check(cell* cell, int r, int c){
     //  [Cell r  , c-1]     [You are here]     [Cell r,   c+1]
     //  [Cell r+1, c-1]     [Cell r+1, c ]     [Cell r+1, c+1]
     //
-    for(int i = -1; i <= 1; i++){
-        for(int j = -1; j <= 1; j++){
-            if(i == 0 && j == 0)
-                continue;
-            else if (r+i < 0 || c + j < 0)
-                continue;
-            else{
-                if(board[r+i][c+j].mined == 1)
-                    (*cell).adjcount++;
-            }
+    int minecount = 0;
+    
+    for(int d = 0; d < neighborcount; d++){
+        int rn = r + row_neighbors[d];
+        int cn = c + col_neighbors[d];
+        if(0 <= rn && rn < rows && 0 <= cn && cn < cols){ // check to make sure we aren't checking out of bounds
+            if(board[rn][cn].mined == 1)
+                minecount++;
         }
     }
+    cell->adjcount = minecount;
+}
+
+void adj_mine(cell* this, int r, int c){
+    for(int d = 0; d < neighborcount; d++){
+        int rn = r + row_neighbors[d];
+        int cn = c + col_neighbors[d];
+        if(0 <= rn && rn < rows && 0 <= cn && cn < cols){ // check to make sure we aren't checking out of bounds
+            board[rn][cn].adjcount++;
+        }
+    }
+    
 }
 
 void display_cell(cell *c){
-    if(c->flagged == 1) printf("P ");
-    else if(c->covered == 1) printf("/ ");
-    else printf("%2d ", c->position);
+    if(c->flagged == 1) printf("%2s", "P");
+    else if(c->covered == 1) printf("%2s", "#");
+    else if(c->mined == 1) printf("%2s", "*");
+    else if(c->adjcount == 0) printf("%2s", ".");
+    else printf("%2d", c->adjcount);
+    //else printf("%2d ", c->position);
 }
+
+int get_random(int range){
+    return ((int)floor((float)range*rand()/RAND_MAX))%range;
+}
+
+void mine_random(){
+    printf("Total mines being generated: %d\n", mines);
+    for(int m = 0; m < mines; m++){
+        int r = get_random(rows);
+        int c = get_random(cols);
+        while(board[r][c].mined == 1){
+            r = get_random(rows);
+            c = get_random(cols);
+        }
+        board[r][c].mined = 1;
+    }
+}
+
+void mine_shuffle(int shuffle){
+    // intialize all the first few rows with mined cells
+    for(int p = 0; p < mines; p++){
+        int r = p/(rows);
+        int c = p%(cols);
+        board[r][c].mined = 1;
+    }
+    
+    // shuffling time
+    for(int s = 0; s < shuffle; s++){
+        int r1 = get_random(rows);      // pick two random cells
+        int c1 = get_random(cols);
+        int r2 = get_random(rows);
+        int c2 = get_random(cols);
+        int x = board[r1][c1].mined;    // swap their mined values
+        int y = board[r2][c2].mined;
+        board[r1][c1].mined = y;
+        board[r2][c2].mined = x;
+    }
+}
+
+// ---------------------------
+// ### Gameplay Functions ###
+// ---------------------------
+
+// Scuffed DFS recursive algorithm.
+void recursive_uncover(int r, int c){
+    if(board[r][c].adjcount > 0){
+        board[r][c].covered = 0;
+        return;
+    }
+    board[r][c].covered = 0;
+    
+    for(int d = 0; d < neighborcount; d++){
+        int rn = r + row_neighbors[d];
+        int cn = c + col_neighbors[d];
+        if(0 <= rn && rn < rows && 0 <= cn && cn < cols){ // check to make sure we aren't checking out of bounds
+            if(board[rn][cn].covered != 0){
+                board[rn][cn].covered = 0;
+                recursive_uncover(rn, cn);
+            }
+        }
+    }
+    
+}
+
+void game_over(){
+    for(int r = 0; r < rows; r++){ // show all cells
+        for(int c = 0; c < cols; c++){
+            board[r][c].covered = 0;
+        }
+    }
+    command_show();
+    printf("You hit a mine! Game Over!\n");
+    
+    
+}
+

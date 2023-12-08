@@ -258,11 +258,12 @@ int command_uncover(int r, int c){
         printf("Please enter a valid cell\n");
         return 1;
     }
-    if(board[r][c].mined == 1){
-        game_over();
-    }else if(board[r][c].flagged == 1){
+    if(board[r][c].flagged == 1){
         printf("Cell at %d, %d is flagged\n", r, c);
         return 1;
+    }
+    else if(board[r][c].mined == 1){
+        game_over();
     }else{
         recursive_uncover(r, c);
     }

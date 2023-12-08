@@ -5,7 +5,7 @@
 //  Author: Aidan Fox
 //
 //  Date Created: 9/17/23.
-//  Last Edited:  10/16/23.
+//  Last Edited:  11/30/23.
 //  -------------------------------
 
 #include <stdio.h>
@@ -53,8 +53,8 @@ void free_space(void);
 
 void command_new(int, int, int);
 void command_show(void);
-void command_uncover(int, int);
-void command_flag(int, int);
+int command_uncover(int, int);
+int command_flag(int, int);
 
 //----------------------------------------
 // ### Cell Struct Function Prototypes ###
@@ -73,12 +73,13 @@ void mine_shuffle(int shuffle);
 // -------------------------------------
 
 void recursive_uncover(int, int);
+int win_game(void);
 void game_over(void);
 
 
 //global variables
 cell **board;                        // 2D array, declared as pointer to a pointer to cell.
-int rows, cols, mines = 0;           // number of rows, columns mines respectively.
+int rows, cols, mines, flags = 0;    // number of rows, columns, mines, and flags respectively.
 int mineCounter;
 const int neighborcount = 8;
 const int row_neighbors[] = {-1, -1, 0, 1, 1,  1,  0, -1}; //offset arrays for neighbor cells
@@ -129,11 +130,9 @@ int process_command(char tokens[][MAXTOKENLENGTH], int tokencount){
         command_show();
         return 1;
     }else if (strcmp(tokens[0], "uncover") == 0){
-        command_uncover(atoi(tokens[1]), atoi(tokens[2]));
-        return 1;
+        return command_uncover(atoi(tokens[1]), atoi(tokens[2]));
     }else if (strcmp(tokens[0], "flag") == 0){
-        command_flag(atoi(tokens[1]), atoi(tokens[2]));
-        return 1;
+        return command_flag(atoi(tokens[1]), atoi(tokens[2]));
     }else if (strcmp(tokens[0], "quit") == 0){
         return 0;
     }
@@ -145,6 +144,13 @@ int run_game(){
     char tokens[MAXTOKENCOUNT][MAXTOKENLENGTH];
     
     srand((unsigned)time(0));
+    
+    printf("\n\n### Welcome to Minesweeper! ###\n\nCommand list:\n");
+    printf("[new] r c m: Creates a new board with r rows, c columns, and m mines.\n");
+    printf("[show]: Shows the current board.\n");
+    printf("[uncover] r c: Uncovers the cell at r, c.\n");
+    printf("[flag] r c: Flags or unflags the cell at r, c.\n");
+    printf("[quit]: Ends the game.\n\n");
     
     while(1){
         int tokencount, status;
@@ -175,7 +181,7 @@ void free_space(){
     rows = 0;
     cols = 0;
     mines = 0;
-    printf("Board Cleared Successfully!\n");
+    //printf("Board Cleared Successfully!\n");
 }
 
 // -----------------
@@ -226,39 +232,66 @@ void command_new(int r, int c, int m){
             }
         }
     }
-    printf("Board Generated Successfuly!\n");
+    //printf("Board Generated Successfuly!\n");
 }
 
 void command_show(){
+    printf("\n   ");
+    for(int c = 0; c < cols; c++){
+        printf("%d ", c);
+    }
+    printf("\n\n");
     for(int i = 0; i < rows; i++){
+        printf("%d ", i);
         for(int j = 0; j < cols; j++){
             display_cell(&board[i][j]);
         }
         printf("\n");
     }
     printf("Total Mines: %d\n", mines);
+    printf("Total flags used: %d\n\n", flags);
     
 }
 
-void command_uncover(int r, int c){
+int command_uncover(int r, int c){
+    if(r > rows-1 || c > cols-1 || r < 0 || c < 0){
+        printf("Please enter a valid cell\n");
+        return 1;
+    }
     if(board[r][c].mined == 1){
         game_over();
     }else if(board[r][c].flagged == 1){
-        printf("Cell at %d, %d is flagged", r, c);
-        return;
+        printf("Cell at %d, %d is flagged\n", r, c);
+        return 1;
     }else{
         recursive_uncover(r, c);
     }
     command_show();
+    if(win_game() == 1){
+        printf("Congrats! You win!\n");
+        return 0;
+    }
+    return 1;
 }
 
-void command_flag(int r, int c){
+int command_flag(int r, int c){
+    if(r > rows-1 || c > cols-1 || r < 0 || c < 0){
+        printf("Please enter a valid cell\n");
+        return 1;
+    }
     if(board[r][c].flagged == 0){
         board[r][c].flagged = 1;
+        flags++;
     }else{
         board[r][c].flagged = 0;
+        flags--;
     }
     command_show();
+    if(win_game() == 1){
+        printf("Congrats! You win!\n");
+        return 0;
+    }
+    return 1;
 }
 
 
@@ -323,7 +356,7 @@ int get_random(int range){
 }
 
 void mine_random(){
-    printf("Total mines being generated: %d\n", mines);
+    //printf("Total mines being generated: %d\n", mines);
     for(int m = 0; m < mines; m++){
         int r = get_random(rows);
         int c = get_random(cols);
@@ -335,6 +368,7 @@ void mine_random(){
     }
 }
 
+// * NOT USED IN CURRENT VERSION * //
 void mine_shuffle(int shuffle){
     // intialize all the first few rows with mined cells
     for(int p = 0; p < mines; p++){
@@ -381,8 +415,19 @@ void recursive_uncover(int r, int c){
     
 }
 
+int win_game(){
+    for(int i = 0; i < rows; i++){
+        for(int j = 0; j < cols; j++){
+            if(board[i][j].mined == 1 && board[i][j].flagged == 0) return 0;
+            else if (board[i][j].mined == 0 && board[i][j].covered == 1)return 0;
+            // if a mine is not flagged, or an empty cell is still covered, then no win.
+        }
+    }
+    return 1;
+}
+
 void game_over(){
-    for(int r = 0; r < rows; r++){ // show all cells
+    for(int r = 0; r < rows; r++){ // helper function to show all cells on lose.
         for(int c = 0; c < cols; c++){
             board[r][c].covered = 0;
         }
